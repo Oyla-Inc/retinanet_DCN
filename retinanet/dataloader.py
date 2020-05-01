@@ -204,13 +204,23 @@ class CSVDataset(Dataset):
     def __getitem__(self, idx):
 
         img = self.load_image(idx)
+        depth = self.load_depth(idx)
         annot = self.load_annotations(idx)
-        sample = {'img': img, 'annot': annot}
+        sample = {'img': img, 'annot': annot,'depth':depth}
         if self.transform:
             sample = self.transform(sample)
 
         return sample
 
+    def load_depth(self,image_index):
+        try:
+            _=self.image_names[image_index].index('/rgb')
+            depth_file_name = self.image_names[image_index].replace('/rgb','/depth')
+        except ValueError:
+            print('no depth file')
+            return None
+        depth = skimage.io.imread(depth_file_name)
+        return depth
     def load_image(self, image_index):
         img = skimage.io.imread(self.image_names[image_index])
 
@@ -305,6 +315,10 @@ def collater(data):
     imgs = [s['img'] for s in data]
     annots = [s['annot'] for s in data]
     scales = [s['scale'] for s in data]
+    if 'depth' in data[0]:
+        depths = [s['depth'] for s in data]
+    else:
+        depths = None
         
     widths = [int(s.shape[0]) for s in imgs]
     heights = [int(s.shape[1]) for s in imgs]
@@ -314,11 +328,16 @@ def collater(data):
     max_height = np.array(heights).max()
 
     padded_imgs = torch.zeros(batch_size, max_width, max_height, 3)
-
+    padded_depths = torch.zeros(batch_size, max_width, max_height,1)
+        
     for i in range(batch_size):
         img = imgs[i]
         padded_imgs[i, :int(img.shape[0]), :int(img.shape[1]), :] = img
-
+        if depths is not None:
+            depth = depths[i]
+            if depth is not None:
+                padded_depths[i,:int(img.shape[0]), :int(img.shape[1]),0] = depth
+            
     max_num_annots = max(annot.shape[0] for annot in annots)
     
     if max_num_annots > 0:
@@ -335,15 +354,19 @@ def collater(data):
 
 
     padded_imgs = padded_imgs.permute(0, 3, 1, 2)
-
-    return {'img': padded_imgs, 'annot': annot_padded, 'scale': scales}
+    padded_depths = padded_depths.permute(0, 3, 1, 2) 
+    return {'img': padded_imgs, 'annot': annot_padded, 'scale': scales,'depth':padded_depths}
 
 class Resizer(object):
     """Convert ndarrays in sample to Tensors."""
 
     def __call__(self, sample, min_side=608, max_side=1024):
         image, annots = sample['img'], sample['annot']
-
+        if 'depth' in sample:
+            depth = sample['depth']
+        else:
+            depth = None
+        
         rows, cols, cns = image.shape
 
         smallest_side = min(rows, cols)
@@ -360,6 +383,9 @@ class Resizer(object):
 
         # resize the image with the computed scale
         image = skimage.transform.resize(image, (int(round(rows*scale)), int(round((cols*scale)))))
+        if depth is not None:
+            depth = skimage.transform.resize(depth, (int(round(rows*scale)), int(round((cols*scale)))),preserve_range=True).astype('int16')
+            
         rows, cols, cns = image.shape
 
         pad_w = 32 - rows%32
@@ -367,10 +393,13 @@ class Resizer(object):
 
         new_image = np.zeros((rows + pad_w, cols + pad_h, cns)).astype(np.float32)
         new_image[:rows, :cols, :] = image.astype(np.float32)
-
         annots[:, :4] *= scale
-
-        return {'img': torch.from_numpy(new_image), 'annot': torch.from_numpy(annots), 'scale': scale}
+        if depth is not None:
+            new_depth = np.zeros((rows + pad_w, cols + pad_h)).astype(np.int16)
+            new_depth[:rows, :cols] = depth.astype(np.int16)
+            return {'img': torch.from_numpy(new_image), 'annot': torch.from_numpy(annots), 'scale': scale,'depth':torch.from_numpy(new_depth)}
+        else:
+            return {'img': torch.from_numpy(new_image), 'annot': torch.from_numpy(annots), 'scale': scale}
 
 
 class Augmenter(object):
@@ -380,8 +409,14 @@ class Augmenter(object):
 
         if np.random.rand() < flip_x:
             image, annots = sample['img'], sample['annot']
+            if 'depth' in sample:
+                depth = sample['depth']
+            else:
+                depth = None
+            
             image = image[:, ::-1, :]
-
+            if depth is not None:
+                depth = depth[:,::-1]
             rows, cols, channels = image.shape
 
             x1 = annots[:, 0].copy()
@@ -391,9 +426,9 @@ class Augmenter(object):
 
             annots[:, 0] = cols - x2
             annots[:, 2] = cols - x_tmp
-
-            sample = {'img': image, 'annot': annots}
-
+            
+            sample = {'img': image, 'annot': annots,'depth':depth}
+            
         return sample
 
 
@@ -406,8 +441,12 @@ class Normalizer(object):
     def __call__(self, sample):
 
         image, annots = sample['img'], sample['annot']
+        if 'depth' in sample:
+            depth = sample['depth']
+        else:
+            depth = None
 
-        return {'img':((image.astype(np.float32)-self.mean)/self.std), 'annot': annots}
+        return {'img':((image.astype(np.float32)-self.mean)/self.std), 'annot': annots,'depth':depth}
 
 class UnNormalizer(object):
     def __init__(self, mean=None, std=None):

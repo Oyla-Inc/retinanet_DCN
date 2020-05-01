@@ -32,8 +32,15 @@ def main(args=None):
     parser.add_argument('--depth', help='Resnet depth, must be one of 18, 34, 50, 101, 152', type=int, default=50)
     parser.add_argument('--epochs', help='Number of epochs', type=int, default=100)
 
+    parser.add_argument('--dcn_layers', type =str, help = 'comma seperated str where laters to be used, 0..3',default = None)
+    parser.add_argument('--use_depth', action='store_true', help='if specified, use depth for deformconv')
     parser = parser.parse_args(args)
-
+    use_dcn = [False, False, False, False]
+    
+    if parser.dcn_layers is not None:    
+        _t = parser.dcn_layers.split(',')
+        for __t in _t:
+            use_dcn[int(__t)] = True
     # Create the data loaders
     if parser.dataset == 'coco':
 
@@ -79,7 +86,7 @@ def main(args=None):
     elif parser.depth == 34:
         retinanet = model.resnet34(num_classes=dataset_train.num_classes(), pretrained=True)
     elif parser.depth == 50:
-        retinanet = model.resnet50(num_classes=dataset_train.num_classes(), pretrained=True)
+        retinanet = model.resnet50(num_classes=dataset_train.num_classes(), pretrained=True, use_dcn = use_dcn, use_depth = parser.use_depth)
     elif parser.depth == 101:
         retinanet = model.resnet101(num_classes=dataset_train.num_classes(), pretrained=True)
     elif parser.depth == 152:
@@ -110,22 +117,28 @@ def main(args=None):
     retinanet.module.freeze_bn()
 
     print('Num training images: {}'.format(len(dataset_train)))
-
+    
     for epoch_num in range(parser.epochs):
 
         retinanet.train()
         retinanet.module.freeze_bn()
 
         epoch_loss = []
-
+        
         for iter_num, data in enumerate(dataloader_train):
             try:
                 optimizer.zero_grad()
 
                 if torch.cuda.is_available():
-                    classification_loss, regression_loss = retinanet([data['img'].cuda().float(), data['annot']])
+                    if parser.use_depth and 'depth' in data:
+                        classification_loss, regression_loss = retinanet([data['img'].cuda().float(), data['annot']],depth = data['depth'].cuda())
+                    else:
+                        classification_loss, regression_loss = retinanet([data['img'].cuda().float(), data['annot']])
                 else:
-                    classification_loss, regression_loss = retinanet([data['img'].float(), data['annot']])
+                    if parser.use_depth and 'depth' in data:
+                        classification_loss, regression_loss = retinanet([data['img'].float(), data['annot']],depth=data['depth'])
+                    else:
+                        classification_loss, regression_loss = retinanet([data['img'].float(), data['annot']])
                     
                 classification_loss = classification_loss.mean()
                 regression_loss = regression_loss.mean()

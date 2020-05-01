@@ -3,7 +3,7 @@ import torch
 import math
 import torch.utils.model_zoo as model_zoo
 from torchvision.ops import nms
-from retinanet.utils import BasicBlock, Bottleneck, BBoxTransform, ClipBoxes
+from retinanet.utils import BasicBlock, Bottleneck, BBoxTransform, ClipBoxes, BasicBlockWithDCN, BottleneckWithDCN
 from retinanet.anchors import Anchors
 from retinanet import losses
 
@@ -154,17 +154,25 @@ class ClassificationModel(nn.Module):
 
 class ResNet(nn.Module):
 
-    def __init__(self, num_classes, block, layers):
+    def __init__(self, num_classes, block, layers,use_depth=False, use_dcn = [False, False, False, False]):
         self.inplanes = 64
         super(ResNet, self).__init__()
+        self.use_depth = use_depth
+        self.use_dcn  = use_dcn
+        print("Doing ResNet with depth and dcn layers",self.use_depth, self.use_dcn)
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        if self.use_depth:
+             self.depth_downsampler1 =  nn.AvgPool2d(7,padding=3,stride=2)
+             
         self.bn1 = nn.BatchNorm2d(64)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        self.layer1 = self._make_layer(block, 64, layers[0])
-        self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
-        self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
-        self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
+        if self.use_depth:
+             self.depth_downsampler_afterpool =  nn.AvgPool2d(3,padding=1,stride=2)
+        self.layer1 = self._make_layer(block, 64, layers[0],use_depth=self.use_depth, use_dcn = self.use_dcn[0])
+        self.layer2 = self._make_layer(block, 128, layers[1], stride=2,use_depth=self.use_depth, use_dcn = self.use_dcn[1])
+        self.layer3 = self._make_layer(block, 256, layers[2], stride=2,use_depth = self.use_depth, use_dcn = self.use_dcn[2])
+        self.layer4 = self._make_layer(block, 512, layers[3], stride=2,use_depth = self.use_depth, use_dcn = self.use_dcn[3])
 
         if block == BasicBlock:
             fpn_sizes = [self.layer2[layers[1] - 1].conv2.out_channels, self.layer3[layers[2] - 1].conv2.out_channels,
@@ -206,7 +214,7 @@ class ResNet(nn.Module):
 
         self.freeze_bn()
 
-    def _make_layer(self, block, planes, blocks, stride=1):
+    def _make_layer(self, block, planes, blocks, stride=1, use_depth = False, use_dcn = False):
         downsample = None
         if stride != 1 or self.inplanes != planes * block.expansion:
             downsample = nn.Sequential(
@@ -214,11 +222,22 @@ class ResNet(nn.Module):
                           kernel_size=1, stride=stride, bias=False),
                 nn.BatchNorm2d(planes * block.expansion),
             )
-
-        layers = [block(self.inplanes, planes, stride, downsample)]
+            
+        if use_dcn:
+            if block == BasicBlock:
+                block = BasicBlockWithDCN
+            elif block == Bottleneck:
+                block = BottleneckWithDCN
+            layers = [block(self.inplanes, planes, stride, downsample, use_depth = use_depth)]
+        else:
+                layers = [block(self.inplanes, planes, stride, downsample)]
+                
         self.inplanes = planes * block.expansion
         for i in range(1, blocks):
-            layers.append(block(self.inplanes, planes))
+            if use_dcn:
+                layers.append(block(self.inplanes, planes,use_depth=use_depth))
+            else:
+                layers.append(block(self.inplanes, planes))
 
         return nn.Sequential(*layers)
 
@@ -228,23 +247,60 @@ class ResNet(nn.Module):
             if isinstance(layer, nn.BatchNorm2d):
                 layer.eval()
 
-    def forward(self, inputs):
+    def forward(self, inputs, depth = None):
 
         if self.training:
             img_batch, annotations = inputs
         else:
             img_batch = inputs
-
+        if depth is None and self.use_depth:
+            raise ValueError("use depth but depth none")
+        
         x = self.conv1(img_batch)
+        if self.use_depth:
+            depth = self.depth_downsampler1(depth)
         x = self.bn1(x)
         x = self.relu(x)
         x = self.maxpool(x)
+        if self.use_depth:
+            depth = self.depth_downsampler_afterpool(depth)
 
-        x1 = self.layer1(x)
-        x2 = self.layer2(x1)
-        x3 = self.layer3(x2)
-        x4 = self.layer4(x3)
+        if depth is not None:
+            print('-a',x.shape,depth.shape)
+        else:
+            print('-a',x.shape)
+        
+        if self.use_dcn[0] and self.use_depth:
+            x1,depth = self.layer1((x, depth))
+        else:
+            x1 = self.layer1(x)
 
+        if depth is not None:
+            print('a',x1.shape,depth.shape)
+        else:
+            print('a',x1.shape)
+            
+        if self.use_dcn[1] and self.use_depth:
+            x2,depth = self.layer2((x1, depth))
+        else:
+            x2 = self.layer2(x1)
+
+        # if depth is not None:
+        #     print('b',x2.shape,depth.shape)
+        # else:
+        #     print('b',x2.shape)
+            
+        if self.use_dcn[2] and self.use_depth:
+            x3,depth = self.layer3((x2,depth))
+        else:
+            x3 = self.layer3(x2)
+        #print('c',x3.shape)
+        if self.use_dcn[3] and self.use_depth:
+            #print(x3.shape,depth.shape)
+            x4,depth = self.layer4((x3, depth))
+        else:
+            x4 = self.layer4(x3)
+        print('d',x4.shape)
         features = self.fpn([x2, x3, x4])
 
         regression = torch.cat([self.regressionModel(feature) for feature in features], dim=1)
@@ -305,9 +361,11 @@ def resnet50(num_classes, pretrained=False, **kwargs):
     Args:
         pretrained (bool): If True, returns a model pre-trained on ImageNet
     """
+    for key, value in kwargs.items(): 
+        print ("%s == %s" %(key, value))
     model = ResNet(num_classes, Bottleneck, [3, 4, 6, 3], **kwargs)
     if pretrained:
-        model.load_state_dict(model_zoo.load_url(model_urls['resnet50'], model_dir='.'), strict=False)
+        model.load_state_dict(model_zoo.load_url(model_urls['resnet50'], model_dir='/Users/rsingh/Packages/pytorch-retinanet'), strict=False)
     return model
 
 
