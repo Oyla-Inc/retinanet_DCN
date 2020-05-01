@@ -329,7 +329,7 @@ def collater(data):
 
     padded_imgs = torch.zeros(batch_size, max_width, max_height, 3)
     padded_depths = torch.zeros(batch_size, max_width, max_height,1)
-        
+    
     for i in range(batch_size):
         img = imgs[i]
         padded_imgs[i, :int(img.shape[0]), :int(img.shape[1]), :] = img

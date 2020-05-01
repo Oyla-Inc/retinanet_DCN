@@ -119,7 +119,7 @@ class BottleneckWithDCN(nn.Module):
         
         if self.use_depth:
             x,depth = x
-            assert x.shape[2:] == depth.shape[2:]
+            #assert x.shape[2:] == depth.shape[2:]
             
         residual = x
         out = self.conv1(x)
