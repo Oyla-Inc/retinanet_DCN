@@ -6,7 +6,8 @@ import numpy as np
 import torch
 import torch.optim as optim
 from torchvision import transforms
-
+from torch.utils.tensorboard import SummaryWriter
+
 from retinanet import model
 from retinanet.dataloader import CocoDataset, CSVDataset, collater, Resizer, AspectRatioBasedSampler, Augmenter, \
     Normalizer
@@ -95,6 +96,7 @@ def main(args=None):
         raise ValueError('Unsupported model depth, must be one of 18, 34, 50, 101, 152')
 
     use_gpu = True
+    writer = SummaryWriter()
 
     if use_gpu:
         if torch.cuda.is_available():
@@ -118,6 +120,7 @@ def main(args=None):
 
     print('Num training images: {}'.format(len(dataset_train)))
     #mAP = csv_eval.evaluate(dataset_val, retinanet)
+    global_step = 0
     for epoch_num in range(parser.epochs):
 
         retinanet.train()
@@ -128,7 +131,7 @@ def main(args=None):
         for iter_num, data in enumerate(dataloader_train):
             try:
                 optimizer.zero_grad()
-
+                global_step += 1
                 if torch.cuda.is_available():
                     if parser.use_depth and 'depth' in data:
                         classification_loss, regression_loss = retinanet([data['img'].cuda().float(), data['annot']],depth = data['depth'].cuda())
@@ -142,7 +145,8 @@ def main(args=None):
                     
                 classification_loss = classification_loss.mean()
                 regression_loss = regression_loss.mean()
-
+                writer.add_scalar('CLS Loss',classification_loss,global_step)
+                
                 loss = classification_loss + regression_loss
 
                 if bool(loss == 0):
@@ -187,7 +191,7 @@ def main(args=None):
     retinanet.eval()
 
     torch.save(retinanet, 'model_final.pt')
-
+    writer.close()
 
 if __name__ == '__main__':
     main()
