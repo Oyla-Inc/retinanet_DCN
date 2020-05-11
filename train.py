@@ -7,7 +7,7 @@ import torch
 import torch.optim as optim
 from torchvision import transforms
 from torch.utils.tensorboard import SummaryWriter
-
+
 from retinanet import model
 from retinanet.dataloader import CocoDataset, CSVDataset, collater, Resizer, AspectRatioBasedSampler, Augmenter, \
     Normalizer
@@ -95,7 +95,7 @@ def main(args=None):
     else:
         raise ValueError('Unsupported model depth, must be one of 18, 34, 50, 101, 152')
 
-    use_gpu = True
+    use_gpu = False
     writer = SummaryWriter()
 
     if use_gpu:
@@ -146,7 +146,7 @@ def main(args=None):
                 classification_loss = classification_loss.mean()
                 regression_loss = regression_loss.mean()
                 writer.add_scalar('CLS Loss',classification_loss,global_step)
-                
+                writer.add_scalar('REG Loss',regression_loss,global_step)
                 loss = classification_loss + regression_loss
 
                 if bool(loss == 0):
