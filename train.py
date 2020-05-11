@@ -94,7 +94,7 @@ def main(args=None):
     else:
         raise ValueError('Unsupported model depth, must be one of 18, 34, 50, 101, 152')
 
-    use_gpu = False
+    use_gpu = True
 
     if use_gpu:
         if torch.cuda.is_available():
@@ -117,7 +117,7 @@ def main(args=None):
     retinanet.module.freeze_bn()
 
     print('Num training images: {}'.format(len(dataset_train)))
-    mAP = csv_eval.evaluate(dataset_val, retinanet)
+    #mAP = csv_eval.evaluate(dataset_val, retinanet)
     for epoch_num in range(parser.epochs):
 
         retinanet.train()

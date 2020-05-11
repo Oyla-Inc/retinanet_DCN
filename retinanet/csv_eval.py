@@ -85,13 +85,20 @@ def _get_detections(dataset, retinanet, score_threshold=0.05, max_detections=100
             data = dataset[index]
             scale = data['scale']
             #print(data['depth'].shape,data['img'].shape)
-            depth = data['depth'][:,:,np.newaxis]#.type(torch.float)
+            if 'depth' in data:
+                depth = data['depth'][:,:,np.newaxis]#.type(torch.float)
             #print(depth)
             # run network
             if torch.cuda.is_available():
-                scores, labels, boxes = retinanet(data['img'].permute(2, 0, 1).cuda().float().unsqueeze(dim=0),depth = data['depth'].permute(2, 0, 1).cuda().float().unsqueeze(dim=0))
+                if 'depth' in data:
+                    scores, labels, boxes = retinanet(data['img'].permute(2, 0, 1).cuda().float().unsqueeze(dim=0),depth = depth.permute(2, 0, 1).cuda().float().unsqueeze(dim=0))
+                else:
+                 scores, labels, boxes = retinanet(data['img'].permute(2, 0, 1).cuda().float().unsqueeze(dim=0))   
             else:
-                scores, labels, boxes = retinanet(data['img'].permute(2, 0, 1).float().unsqueeze(dim=0),depth = depth.permute(2, 0, 1).float().unsqueeze(dim=0))
+                if 'depth' in data:
+                    scores, labels, boxes = retinanet(data['img'].permute(2, 0, 1).float().unsqueeze(dim=0),depth = depth.permute(2, 0, 1).float().unsqueeze(dim=0))
+                else:
+                    scores, labels, boxes = retinanet(data['img'].permute(2, 0, 1).float().unsqueeze(dim=0))
             scores = scores.cpu().numpy()
             labels = labels.cpu().numpy()
             boxes  = boxes.cpu().numpy()

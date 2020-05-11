@@ -365,7 +365,7 @@ def resnet50(num_classes, pretrained=False, **kwargs):
         print ("%s == %s" %(key, value))
     model = ResNet(num_classes, Bottleneck, [3, 4, 6, 3], **kwargs)
     if pretrained:
-        model.load_state_dict(model_zoo.load_url(model_urls['resnet50'], model_dir='/Users/rsingh/Packages/pytorch-retinanet'), strict=False)
+        model.load_state_dict(model_zoo.load_url(model_urls['resnet50'], model_dir='../pytorch-retinanet'), strict=False)
     return model
 
 
